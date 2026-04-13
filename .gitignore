@@ -1,0 +1,30 @@
+# ── Secrets — NEVER commit these ─────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+
+# ── Go backend ────────────────────────────────────────────────────────────────
+backend/bin/
+backend/*.exe
+backend/*.test
+backend/*.out
+backend/vendor/
+
+# ── Frontend ──────────────────────────────────────────────────────────────────
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# ── macOS ─────────────────────────────────────────────────────────────────────
+.DS_Store
+**/.DS_Store
+*.AppleDouble
+
+# ── Editor / IDE ──────────────────────────────────────────────────────────────
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+*.log
