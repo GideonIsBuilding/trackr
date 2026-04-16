@@ -28,3 +28,15 @@ frontend/.vite/
 
 # ── Logs ─────────────────────────────────────────────────────────────────────
 *.log
+
+# ── Docker ────────────────────────────────────────────────────────────────────
+.env
+*.env
+!.env.example
+
+# Docker override files (local dev tweaks, not for source control)
+docker-compose.override.yml
+docker-compose.local.yml
+
+# OrbStack / Docker runtime files
+.orbstack/
