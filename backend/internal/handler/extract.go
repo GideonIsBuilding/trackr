@@ -2,12 +2,16 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"regexp"
 	"strings"
+	"time"
+
+	"github.com/yourname/job-tracker/internal/metrics"
 )
 
 type ExtractHandler struct{}
@@ -38,17 +42,28 @@ func (h *ExtractHandler) Extract(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Try quick title parse first — records as "quick_parse" method
+	start := time.Now()
 	if result := tryQuickParse(req.Title, req.URL); result != nil {
 		result.Location = extractLocation(req.Content)
+		duration := time.Since(start).Seconds()
+		metrics.ExtractionRequestsTotal.WithLabelValues("quick_parse").Inc()
+		metrics.ExtractionDuration.WithLabelValues("quick_parse").Observe(duration)
 		writeJSON(w, http.StatusOK, result)
 		return
 	}
 
+	// Fall back to Gemini — records as "gemini" method
 	result, err := callGemini(req.Title, req.Content, req.URL)
+	duration := time.Since(start).Seconds()
 	if err != nil {
+		metrics.ExtractionErrorsTotal.WithLabelValues("gemini").Inc()
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("extraction failed: %s", err.Error()))
 		return
 	}
+
+	metrics.ExtractionRequestsTotal.WithLabelValues("gemini").Inc()
+	metrics.ExtractionDuration.WithLabelValues("gemini").Observe(duration)
 
 	writeJSON(w, http.StatusOK, result)
 }
@@ -82,7 +97,6 @@ func tryQuickParse(title, url string) *extractResponse {
 	if title == "" {
 		return nil
 	}
-
 	atRe := regexp.MustCompile(`(?i)^(.+?)\s+at\s+(.+?)(?:\s*[|` + "\u2013" + `\-].*)?$`)
 	if m := atRe.FindStringSubmatch(title); len(m) == 3 {
 		role := strings.TrimSpace(m[1])
@@ -91,7 +105,6 @@ func tryQuickParse(title, url string) *extractResponse {
 			return &extractResponse{Company: &company, Role: &role, Source: detectSource(url)}
 		}
 	}
-
 	sepRe := regexp.MustCompile(`^(.+?)\s*[-` + "\u2013" + `]\s*(.+?)(?:\s*[|` + "\u2013" + `\-].*)?$`)
 	if m := sepRe.FindStringSubmatch(title); len(m) == 3 {
 		role := strings.TrimSpace(m[1])
@@ -102,7 +115,6 @@ func tryQuickParse(title, url string) *extractResponse {
 			return &extractResponse{Company: &company, Role: &role, Source: detectSource(url)}
 		}
 	}
-
 	return nil
 }
 
@@ -151,7 +163,6 @@ func callGemini(title, content, url string) (*extractResponse, error) {
 	if apiKey == "" {
 		return nil, fmt.Errorf("GEMINI_API_KEY environment variable not set")
 	}
-
 	if len(content) > 6000 {
 		content = content[:6000]
 	}
@@ -169,16 +180,9 @@ func callGemini(title, content, url string) (*extractResponse, error) {
 }
 
 STRICT RULES:
-- company: NEVER put salary, location, job level, or job board names (Greenhouse, Lever, Crossover, Workable, Canonical-but-on-greenhouse). Look in the page CONTENT for the actual employer.
-- role: Job title only. No salary, no company, no level suffix like "(Entry-Level)".
-- location: City/country or "Remote". Never a company name.
-- source: "job_board" if URL has greenhouse/lever/workable/crossover/indeed/glassdoor. Otherwise "company_site".
-
-Examples:
-- Canonical page on greenhouse → company:"Canonical", role:"Ubuntu Sales Engineer", location:"Remote"
-- Moniepoint careers page → company:"Moniepoint", role:"Site Reliability Engineer", location:"Remote, Nigeria"
-- Crossover DevOps → company:"IgniteTech", role:"DevOps Specialist", location:"Remote"
-- Servant Talent on workable → company:"Servant Talent", role:"DevOps & Cloud Engineer"}`
+- company: NEVER put salary, location, job level, or job board names here.
+- role: Job title only. No salary, no company, no level suffix.
+- source: "job_board" if URL has greenhouse/lever/workable/crossover/indeed/glassdoor. Otherwise "company_site".`
 
 	reqBody := map[string]any{
 		"contents": []map[string]any{
@@ -193,11 +197,21 @@ Examples:
 
 	bodyBytes, _ := json.Marshal(reqBody)
 	geminiURL := fmt.Sprintf(
-		"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent?key=%s",
+		"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=%s",
 		apiKey,
 	)
 
-	resp, err := http.Post(geminiURL, "application/json", bytes.NewReader(bodyBytes))
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, geminiURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, fmt.Errorf("creating gemini request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("gemini request failed: %w", err)
 	}
@@ -215,7 +229,6 @@ Examples:
 			Message string `json:"message"`
 		} `json:"error"`
 	}
-
 	if err := json.NewDecoder(resp.Body).Decode(&geminiResp); err != nil {
 		return nil, fmt.Errorf("parsing gemini response: %w", err)
 	}
@@ -239,6 +252,5 @@ Examples:
 	if result.Source == "" {
 		result.Source = detectSource(url)
 	}
-
 	return &result, nil
 }

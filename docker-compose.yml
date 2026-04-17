@@ -76,5 +76,49 @@ services:
     ports:
       - "5173:80"
 
+  # ── PostgreSQL Exporter ─────────────────────────────────────────────────────
+  postgres_exporter:
+    image: prometheuscommunity/postgres-exporter:latest
+    container_name: trackr-postgres-exporter
+    restart: unless-stopped
+    environment:
+      DATA_SOURCE_NAME: postgresql://${POSTGRES_USER:-trackr}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-job_tracker}?sslmode=disable
+    ports:
+      - "9187:9187"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # ── Prometheus ──────────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: trackr-prometheus
+    restart: unless-stopped
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle'
+    ports:
+      - "9090:9090"
+    depends_on:
+      - backend
+
+  # ── Node Exporter (host metrics) ────────────────────────────────────────────
+  node_exporter:
+    image: prom/node-exporter:latest
+    container_name: trackr-node-exporter
+    restart: unless-stopped
+    command:
+      - '--path.rootfs=/host'
+    volumes:
+      - /:/host:ro,rslave
+    ports:
+      - "9100:9100"
+
 volumes:
   db_data:
+  prometheus_data:

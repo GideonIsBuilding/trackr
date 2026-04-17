@@ -6,12 +6,11 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/yourname/job-tracker/internal/metrics"
 	"github.com/yourname/job-tracker/internal/model"
 	"github.com/yourname/job-tracker/internal/store"
 )
 
-// Notifier is the interface the reminder engine uses to deliver alerts.
-// Swap in email, push notifications, webhooks, etc. without touching engine logic.
 type Notifier interface {
 	Notify(ctx context.Context, alert *model.ReminderAlert) error
 }
@@ -37,14 +36,11 @@ func NewReminderEngine(
 	}
 }
 
-// Run starts the reminder engine loop. It blocks until ctx is cancelled.
-// Call this in its own goroutine: go engine.Run(ctx)
 func (e *ReminderEngine) Run(ctx context.Context) {
 	e.log.Info("reminder engine started", "check_interval", e.interval)
 	ticker := time.NewTicker(e.interval)
 	defer ticker.Stop()
 
-	// Run once immediately at startup
 	e.scan(ctx)
 
 	for {
@@ -59,6 +55,15 @@ func (e *ReminderEngine) Run(ctx context.Context) {
 }
 
 func (e *ReminderEngine) scan(ctx context.Context) {
+	// Record that a scan cycle started
+	metrics.ReminderScansTotal.Inc()
+
+	// Time the entire scan — records to the histogram on exit
+	start := time.Now()
+	defer func() {
+		metrics.ReminderScanDuration.Observe(time.Since(start).Seconds())
+	}()
+
 	e.log.Debug("scanning for due reminders")
 
 	alerts, err := e.reminders.ScanDue(ctx)
@@ -90,10 +95,12 @@ func (e *ReminderEngine) notify(ctx context.Context, alert *model.ReminderAlert)
 		return fmt.Errorf("notifier: %w", err)
 	}
 
-	// Mark as sent so it doesn't fire again until next silence window
 	if err := e.reminders.MarkSent(ctx, alert.Reminder.ID); err != nil {
 		return fmt.Errorf("marking reminder sent: %w", err)
 	}
+
+	// Record that a reminder was successfully fired
+	metrics.RemindersFiredTotal.Inc()
 
 	e.log.Info("reminder sent",
 		"user_email", alert.User.Email,
@@ -103,8 +110,6 @@ func (e *ReminderEngine) notify(ctx context.Context, alert *model.ReminderAlert)
 	)
 	return nil
 }
-
-// --- Log-only notifier (default, swap for email in production) ---
 
 type LogNotifier struct {
 	log *slog.Logger

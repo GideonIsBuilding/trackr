@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/yourname/job-tracker/internal/metrics"
 	"github.com/yourname/job-tracker/internal/middleware"
 	"github.com/yourname/job-tracker/internal/model"
 	"github.com/yourname/job-tracker/internal/store"
@@ -30,13 +31,13 @@ func (h *ApplicationHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		Company   string `json:"company"`
-		Role      string `json:"role"`
+		Company   string  `json:"company"`
+		Role      string  `json:"role"`
 		JobURL    *string `json:"job_url"`
 		Location  *string `json:"location"`
 		Source    string  `json:"source"`
 		Notes     *string `json:"notes"`
-		AppliedAt *string `json:"applied_at"` // YYYY-MM-DD, defaults to today
+		AppliedAt *string `json:"applied_at"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -81,6 +82,9 @@ func (h *ApplicationHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Business metric — a new application was logged
+	metrics.ApplicationsCreatedTotal.Inc()
+
 	writeJSON(w, http.StatusCreated, app)
 }
 
@@ -92,14 +96,12 @@ func (h *ApplicationHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	statusFilter := model.ApplicationStatus(r.URL.Query().Get("status"))
-
 	apps, err := h.apps.List(r.Context(), userID, statusFilter)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to fetch applications")
 		return
 	}
 
-	// Return empty array, not null
 	if apps == nil {
 		apps = []*model.Application{}
 	}
@@ -169,6 +171,9 @@ func (h *ApplicationHandler) UpdateStatus(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, "failed to update status")
 		return
 	}
+
+	// Business metric — track which status applications move to
+	metrics.ApplicationStatusUpdatesTotal.WithLabelValues(body.Status).Inc()
 
 	writeJSON(w, http.StatusOK, history)
 }

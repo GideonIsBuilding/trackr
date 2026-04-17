@@ -15,11 +15,13 @@ import (
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"github.com/joho/godotenv"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/yourname/job-tracker/internal/config"
 	"github.com/yourname/job-tracker/internal/db"
 	"github.com/yourname/job-tracker/internal/handler"
 	authmiddleware "github.com/yourname/job-tracker/internal/middleware"
+	prommetrics "github.com/yourname/job-tracker/internal/middleware"
 	"github.com/yourname/job-tracker/internal/service"
 	"github.com/yourname/job-tracker/internal/store"
 )
@@ -78,6 +80,7 @@ func main() {
 
 	// --- Router ---
 	r := chi.NewRouter()
+
 	r.Use(chimiddleware.RequestID)
 	r.Use(chimiddleware.RealIP)
 	r.Use(chimiddleware.Logger)
@@ -90,21 +93,28 @@ func main() {
 		AllowCredentials: true,
 	}))
 
-	// Public
-	r.Post("/api/auth/register", authHandler.Register)
-	r.Post("/api/auth/login", authHandler.Login)
-	r.Post("/api/auth/forgot-password", passwordResetHandler.ForgotPassword)
-	r.Post("/api/auth/reset-password", passwordResetHandler.ResetPassword)
+	// Prometheus middleware — records duration and count for every request
+	r.Use(prommetrics.PrometheusMiddleware)
+
+	// Metrics endpoint — Prometheus scrapes this every 15s
+	r.Handle("/metrics", promhttp.Handler())
+
+	// Health check
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 
-	// Protected
+	// Public routes
+	r.Post("/api/auth/register", authHandler.Register)
+	r.Post("/api/auth/login", authHandler.Login)
+	r.Post("/api/auth/forgot-password", passwordResetHandler.ForgotPassword)
+	r.Post("/api/auth/reset-password", passwordResetHandler.ResetPassword)
+
+	// Protected routes
 	r.Group(func(r chi.Router) {
 		r.Use(authmiddleware.Authenticate(cfg.JWTSecret))
 
-		// Applications
 		r.Post("/api/applications", appHandler.Create)
 		r.Get("/api/applications", appHandler.List)
 		r.Get("/api/applications/{id}", appHandler.Get)
@@ -113,14 +123,10 @@ func main() {
 		r.Delete("/api/applications/{id}", appHandler.Delete)
 		r.Patch("/api/applications/{id}/checklist", checklistHandler.Update)
 
-		// Reminders
 		r.Put("/api/applications/{id}/reminder", reminderHandler.Configure)
 		r.Post("/api/applications/{id}/reminder/snooze", reminderHandler.Snooze)
 
-		// Analytics
 		r.Get("/api/analytics", analyticsHandler.GetSummary)
-
-		// Extract
 		r.Post("/api/extract", extractHandler.Extract)
 	})
 
