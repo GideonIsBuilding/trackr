@@ -53,21 +53,21 @@ function PasswordStrength({ password }: { password: string }) {
   ]
 
   return (
-    <div style={{ marginTop: 10 }}>
+    <div style={{ marginTop: 12 }}>
+      {/* Label */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: '#767676' }}>Password strength</span>
+        <span style={{ fontSize: 12, fontWeight: 700, color }}>{STRENGTH_LABEL[level]}</span>
+      </div>
       {/* Bar */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-        <div style={{ flex: 1, display: 'flex', gap: 4 }}>
-          {([0, 1, 2, 3] as const).map(i => (
-            <div key={i} style={{
-              flex: 1, height: 4, borderRadius: 99,
-              background: i < level ? color : '#E8E8E8',
-              transition: 'background 0.2s',
-            }} />
-          ))}
-        </div>
-        <span style={{ fontSize: 12, fontWeight: 700, color, minWidth: 60, textAlign: 'right' }}>
-          {STRENGTH_LABEL[level]}
-        </span>
+      <div style={{ display: 'flex', gap: 4, marginBottom: 12 }}>
+        {([0, 1, 2, 3] as const).map(i => (
+          <div key={i} style={{
+            flex: 1, height: 8, borderRadius: 99,
+            background: i < level ? color : '#E8E8E8',
+            transition: 'background 0.25s',
+          }} />
+        ))}
       </div>
 
       {/* Checklist */}
