@@ -111,6 +111,37 @@ func (e *ReminderEngine) notify(ctx context.Context, alert *model.ReminderAlert)
 	return nil
 }
 
+// EmailNotifier sends reminder alerts via email. Use it when SMTP is configured.
+type EmailNotifier struct {
+	email *EmailService
+	log   *slog.Logger
+}
+
+func NewEmailNotifier(email *EmailService, log *slog.Logger) *EmailNotifier {
+	return &EmailNotifier{email: email, log: log}
+}
+
+func (n *EmailNotifier) Notify(_ context.Context, alert *model.ReminderAlert) error {
+	err := n.email.SendReminderAlert(
+		alert.User.Email,
+		alert.Application.Role,
+		alert.Application.Company,
+		string(alert.Application.Status),
+		alert.SilentDays,
+	)
+	if err != nil {
+		return fmt.Errorf("sending reminder email to %s: %w", alert.User.Email, err)
+	}
+	n.log.Info("reminder email sent",
+		"user", alert.User.Email,
+		"company", alert.Application.Company,
+		"role", alert.Application.Role,
+	)
+	return nil
+}
+
+// LogNotifier is the fallback when SMTP is not configured.
+// It records the reminder in the server logs only — no email is sent.
 type LogNotifier struct {
 	log *slog.Logger
 }
@@ -119,17 +150,13 @@ func NewLogNotifier(log *slog.Logger) *LogNotifier {
 	return &LogNotifier{log: log}
 }
 
-func (n *LogNotifier) Notify(ctx context.Context, alert *model.ReminderAlert) error {
-	n.log.Warn("FOLLOW-UP REMINDER",
+func (n *LogNotifier) Notify(_ context.Context, alert *model.ReminderAlert) error {
+	n.log.Warn("FOLLOW-UP REMINDER (email not configured — SMTP credentials missing)",
 		"user", alert.User.Email,
 		"company", alert.Application.Company,
 		"role", alert.Application.Role,
 		"status", alert.Application.Status,
 		"silent_days", alert.SilentDays,
-		"suggestion", fmt.Sprintf(
-			"You applied to %s at %s %d days ago with no update. Consider sending a follow-up email.",
-			alert.Application.Role, alert.Application.Company, alert.SilentDays,
-		),
 	)
 	return nil
 }

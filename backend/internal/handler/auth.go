@@ -3,13 +3,64 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
+	"unicode"
 
 	"github.com/yourname/job-tracker/internal/service"
 )
 
 const sessionCookieName = "trackr_session"
+
+// validatePassword enforces the minimum advisable password policy:
+// at least 12 characters containing uppercase, lowercase, digit, and special character.
+func validatePassword(p string) error {
+	if len(p) < 12 {
+		return errors.New("password must be at least 12 characters")
+	}
+	var hasUpper, hasLower, hasDigit, hasSpecial bool
+	for _, c := range p {
+		switch {
+		case unicode.IsUpper(c):
+			hasUpper = true
+		case unicode.IsLower(c):
+			hasLower = true
+		case unicode.IsDigit(c):
+			hasDigit = true
+		case unicode.IsPunct(c) || unicode.IsSymbol(c):
+			hasSpecial = true
+		}
+	}
+	var missing []string
+	if !hasUpper {
+		missing = append(missing, "an uppercase letter")
+	}
+	if !hasLower {
+		missing = append(missing, "a lowercase letter")
+	}
+	if !hasDigit {
+		missing = append(missing, "a number")
+	}
+	if !hasSpecial {
+		missing = append(missing, "a special character")
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("password must contain %s", joinRequirements(missing))
+	}
+	return nil
+}
+
+func joinRequirements(items []string) string {
+	switch len(items) {
+	case 1:
+		return items[0]
+	case 2:
+		return items[0] + " and " + items[1]
+	default:
+		return items[0] + ", " + joinRequirements(items[1:])
+	}
+}
 
 type AuthHandler struct {
 	auth   *service.AuthService
@@ -49,8 +100,8 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "email and password are required")
 		return
 	}
-	if len(body.Password) < 8 {
-		writeError(w, http.StatusBadRequest, "password must be at least 8 characters")
+	if err := validatePassword(body.Password); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 

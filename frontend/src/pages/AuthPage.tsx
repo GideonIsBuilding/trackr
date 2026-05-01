@@ -1,16 +1,115 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { login, register } from '@/api/client'
 import { useAuth } from '@/hooks/useAuth'
 
+// ── Password strength ─────────────────────────────────────────────────────────
+
+interface PasswordChecks {
+  length: boolean
+  upper: boolean
+  lower: boolean
+  digit: boolean
+  special: boolean
+}
+
+function checkPassword(p: string): PasswordChecks {
+  return {
+    length:  p.length >= 12,
+    upper:   /[A-Z]/.test(p),
+    lower:   /[a-z]/.test(p),
+    digit:   /[0-9]/.test(p),
+    special: /[^A-Za-z0-9]/.test(p),
+  }
+}
+
+type StrengthLevel = 0 | 1 | 2 | 3 | 4
+
+function strengthLevel(checks: PasswordChecks): StrengthLevel {
+  const score = Object.values(checks).filter(Boolean).length
+  if (score <= 1) return 0
+  if (score === 2) return 1
+  if (score === 3) return 2
+  if (score === 4) return 3
+  return 4
+}
+
+const STRENGTH_LABEL = ['Very weak', 'Weak', 'Fair', 'Good', 'Strong'] as const
+const STRENGTH_COLOR = ['#EF4444', '#F97316', '#EAB308', '#22C55E', '#16A34A'] as const
+
+function PasswordStrength({ password }: { password: string }) {
+  const checks = useMemo(() => checkPassword(password), [password])
+  const level  = strengthLevel(checks)
+  const color  = STRENGTH_COLOR[level]
+
+  if (!password) return null
+
+  const requirements: [keyof PasswordChecks, string][] = [
+    ['length',  'At least 12 characters'],
+    ['upper',   'Uppercase letter (A–Z)'],
+    ['lower',   'Lowercase letter (a–z)'],
+    ['digit',   'Number (0–9)'],
+    ['special', 'Special character (!@#$…)'],
+  ]
+
+  return (
+    <div style={{ marginTop: 10 }}>
+      {/* Bar */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+        <div style={{ flex: 1, display: 'flex', gap: 4 }}>
+          {([0, 1, 2, 3] as const).map(i => (
+            <div key={i} style={{
+              flex: 1, height: 4, borderRadius: 99,
+              background: i < level ? color : '#E8E8E8',
+              transition: 'background 0.2s',
+            }} />
+          ))}
+        </div>
+        <span style={{ fontSize: 12, fontWeight: 700, color, minWidth: 60, textAlign: 'right' }}>
+          {STRENGTH_LABEL[level]}
+        </span>
+      </div>
+
+      {/* Checklist */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {requirements.map(([key, label]) => (
+          <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{
+              width: 16, height: 16, borderRadius: '50%', flexShrink: 0,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: checks[key] ? '#22C55E' : '#E8E8E8',
+              transition: 'background 0.15s',
+            }}>
+              {checks[key] && (
+                <svg width="9" height="7" viewBox="0 0 9 7" fill="none">
+                  <path d="M1 3.5L3.5 6L8 1" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              )}
+            </span>
+            <span style={{
+              fontSize: 12, fontWeight: 500,
+              color: checks[key] ? '#191919' : '#9CA3AF',
+              transition: 'color 0.15s',
+            }}>
+              {label}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ── Page ──────────────────────────────────────────────────────────────────────
+
 export default function AuthPage() {
-  const [mode, setMode] = useState<'login' | 'register'>('login')
-  const [email, setEmail] = useState('')
+  const [mode, setMode]       = useState<'login' | 'register'>('login')
+  const [email, setEmail]     = useState('')
   const [password, setPassword] = useState('')
-  const [error, setError] = useState('')
+  const [error, setError]     = useState('')
   const [loading, setLoading] = useState(false)
   const { signIn } = useAuth()
-  const navigate = useNavigate()
+  const navigate   = useNavigate()
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -70,7 +169,7 @@ export default function AuthPage() {
             borderRadius: 12, padding: 4, marginBottom: 40,
           }}>
             {(['login', 'register'] as const).map(m => (
-              <button key={m} onClick={() => { setMode(m); setError('') }} style={{
+              <button key={m} onClick={() => { setMode(m); setError(''); setPassword('') }} style={{
                 flex: 1, padding: '10px 0', borderRadius: 9,
                 fontWeight: 700, fontSize: 14,
                 background: mode === m ? '#fff' : 'transparent',
@@ -113,11 +212,12 @@ export default function AuthPage() {
                 )}
               </div>
               <input type="password" required value={password} onChange={e => setPassword(e.target.value)}
-                placeholder={mode === 'register' ? 'Min. 8 characters' : '••••••••'}
+                placeholder={mode === 'register' ? 'Min. 12 characters' : '••••••••'}
                 style={{ width: '100%', padding: '14px 16px', borderRadius: 10, border: '1.5px solid #E8E8E8', fontSize: 15, outline: 'none' }}
                 onFocus={e => e.currentTarget.style.borderColor = '#FF3008'}
                 onBlur={e => e.currentTarget.style.borderColor = '#E8E8E8'}
               />
+              {mode === 'register' && <PasswordStrength password={password} />}
             </div>
 
             {error && (

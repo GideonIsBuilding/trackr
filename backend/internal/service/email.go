@@ -45,6 +45,24 @@ Your password will not be changed.
 	return s.send(toEmail, subject, body)
 }
 
+func (s *EmailService) SendReminderAlert(toEmail, role, company, status string, silentDays int) error {
+	subject := fmt.Sprintf("Follow-up reminder: %s at %s", role, company)
+	body := fmt.Sprintf(`Hi,
+
+It has been %d day(s) since you applied for the %s position at %s with no update (current status: %s).
+
+Now might be a good time to send a follow-up email to check on your application.
+
+View your application: %s
+
+Good luck!
+
+— The Trackr Team
+`, silentDays, role, company, status, s.cfg.AppURL)
+
+	return s.send(toEmail, subject, body)
+}
+
 func (s *EmailService) SendWelcome(toEmail string) error {
 	subject := "Welcome to Trackr"
 	body := fmt.Sprintf(`Hi,

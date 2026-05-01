@@ -67,7 +67,16 @@ func main() {
 		AppURL:       cfg.AppURL,
 	})
 	resetService := service.NewPasswordResetService(userStore, resetStore, emailService)
-	notifier := service.NewLogNotifier(log)
+	// Use email notifications when SMTP credentials are present;
+	// fall back to log-only so the engine still runs in dev without SMTP.
+	var notifier service.Notifier
+	if cfg.SMTPUsername != "" && cfg.SMTPPassword != "" {
+		notifier = service.NewEmailNotifier(emailService, log)
+		log.Info("reminder notifications: email")
+	} else {
+		notifier = service.NewLogNotifier(log)
+		log.Warn("reminder notifications: log-only (set SMTP_USERNAME + SMTP_PASSWORD to enable email)")
+	}
 	reminderEngine := service.NewReminderEngine(reminderStore, notifier, cfg.ReminderCheckInterval, log)
 
 	// --- Handlers ---
