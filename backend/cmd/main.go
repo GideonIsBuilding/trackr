@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"github.com/go-chi/httprate"
 	"github.com/joho/godotenv"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
@@ -70,7 +71,7 @@ func main() {
 	reminderEngine := service.NewReminderEngine(reminderStore, notifier, cfg.ReminderCheckInterval, log)
 
 	// --- Handlers ---
-	authHandler := handler.NewAuthHandler(authService)
+	authHandler := handler.NewAuthHandler(authService, cfg.JWTExpiry)
 	passwordResetHandler := handler.NewPasswordResetHandler(resetService)
 	appHandler := handler.NewApplicationHandler(appStore, contactStore)
 	reminderHandler := handler.NewReminderHandler(appStore, reminderStore)
@@ -87,7 +88,7 @@ func main() {
 	r.Use(chimiddleware.Recoverer)
 	r.Use(chimiddleware.Timeout(30 * time.Second))
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"http://localhost:5173", "https://yourdomain.com"},
+		AllowedOrigins:   []string{"http://localhost:5173", "https://yourdomain.com", "chrome-extension://*"},
 		AllowedMethods:   []string{"GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
 		AllowCredentials: true,
@@ -96,9 +97,6 @@ func main() {
 	// Prometheus middleware — records duration and count for every request
 	r.Use(prommetrics.PrometheusMiddleware)
 
-	// Metrics endpoint — Prometheus scrapes this every 15s
-	r.Handle("/metrics", promhttp.Handler())
-
 	// Health check
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -106,10 +104,27 @@ func main() {
 	})
 
 	// Public routes
-	r.Post("/api/auth/register", authHandler.Register)
-	r.Post("/api/auth/login", authHandler.Login)
+	// Login and register are rate-limited by IP to block brute-force and
+	// credential-stuffing attacks. chimiddleware.RealIP (applied above) ensures
+	// the limiter sees the actual client IP even behind a reverse proxy.
+	r.Group(func(r chi.Router) {
+		r.Use(httprate.Limit(
+			10, time.Minute,
+			httprate.WithKeyFuncs(httprate.KeyByIP),
+			httprate.WithLimitHandler(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusTooManyRequests)
+				_, _ = w.Write([]byte(`{"error":"too many requests, please try again later"}`))
+			}),
+		))
+		r.Post("/api/auth/login", authHandler.Login)
+		r.Post("/api/auth/register", authHandler.Register)
+	})
+
 	r.Post("/api/auth/forgot-password", passwordResetHandler.ForgotPassword)
 	r.Post("/api/auth/reset-password", passwordResetHandler.ResetPassword)
+	r.Get("/api/auth/extension-token", authHandler.ExtensionToken)
+	r.Post("/api/auth/logout", authHandler.Logout)
 
 	// Protected routes
 	r.Group(func(r chi.Router) {
@@ -135,7 +150,26 @@ func main() {
 	defer cancelEngine()
 	go reminderEngine.Run(engineCtx)
 
-	// --- Server ---
+	// --- Internal metrics server ---
+	// Binds to :9091 which is NOT mapped to the host in docker-compose.
+	// Only reachable by services in the same Docker network (i.e. Prometheus).
+	// This keeps /metrics off the public API entirely.
+	metricsMux := http.NewServeMux()
+	metricsMux.Handle("/metrics", promhttp.Handler())
+	metricsSrv := &http.Server{
+		Addr:         ":9091",
+		Handler:      metricsMux,
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 5 * time.Second,
+	}
+	go func() {
+		log.Info("metrics server starting", "port", "9091")
+		if err := metricsSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Error("metrics server error", "error", err)
+		}
+	}()
+
+	// --- API server ---
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%s", cfg.Port),
 		Handler:      r,
@@ -161,6 +195,9 @@ func main() {
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Error("graceful shutdown failed", "error", err)
+	}
+	if err := metricsSrv.Shutdown(shutdownCtx); err != nil {
+		log.Error("metrics server shutdown failed", "error", err)
 	}
 	log.Info("server stopped")
 }

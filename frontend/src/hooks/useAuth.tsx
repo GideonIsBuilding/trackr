@@ -1,36 +1,34 @@
 import { createContext, useContext, useState, useCallback, type ReactNode } from 'react'
 import type { User } from '@/types'
+import { logout as apiLogout } from '@/api/client'
 
 interface AuthContextValue {
   user: User | null
-  token: string | null
-  signIn: (user: User, token: string) => void
+  signIn: (user: User) => void
   signOut: () => void
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  // Only the user display object is kept in localStorage — never the JWT.
+  // The JWT lives exclusively in the httpOnly session cookie set by the backend.
   const [user, setUser] = useState<User | null>(() => {
     try { return JSON.parse(localStorage.getItem('user') ?? 'null') } catch { return null }
   })
-  const [token, setToken] = useState<string | null>(() => localStorage.getItem('token'))
 
-  const signIn = useCallback((u: User, t: string) => {
+  const signIn = useCallback((u: User) => {
     localStorage.setItem('user', JSON.stringify(u))
-    localStorage.setItem('token', t)
     setUser(u)
-    setToken(t)
   }, [])
 
-  const signOut = useCallback(() => {
+  const signOut = useCallback(async () => {
+    try { await apiLogout() } catch { /* best-effort — clear client state regardless */ }
     localStorage.removeItem('user')
-    localStorage.removeItem('token')
     setUser(null)
-    setToken(null)
   }, [])
 
-  return <AuthContext.Provider value={{ user, token, signIn, signOut }}>{children}</AuthContext.Provider>
+  return <AuthContext.Provider value={{ user, signIn, signOut }}>{children}</AuthContext.Provider>
 }
 
 export function useAuth() {

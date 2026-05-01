@@ -18,8 +18,8 @@ export default function AuthPage() {
     setLoading(true)
     try {
       const fn = mode === 'login' ? login : register
-      const { user, token } = await fn(email, password, Intl.DateTimeFormat().resolvedOptions().timeZone)
-      signIn(user, token)
+      const { user } = await fn(email, password, Intl.DateTimeFormat().resolvedOptions().timeZone)
+      signIn(user)
       navigate('/')
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Something went wrong')

@@ -73,6 +73,33 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (*model
 	return user, token, nil
 }
 
+// ParseToken validates a JWT and returns the subject (user ID string).
+func (s *AuthService) ParseToken(tokenStr string) (string, error) {
+	token, err := jwt.Parse(tokenStr, func(t *jwt.Token) (any, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method")
+		}
+		return []byte(s.jwtSecret), nil
+	}, jwt.WithValidMethods([]string{"HS256"}))
+	if err != nil || !token.Valid {
+		return "", fmt.Errorf("invalid token")
+	}
+	sub, err := token.Claims.GetSubject()
+	if err != nil {
+		return "", fmt.Errorf("invalid claims")
+	}
+	return sub, nil
+}
+
+// GetUser looks up a user by their string UUID.
+func (s *AuthService) GetUser(ctx context.Context, userID string) (*model.User, error) {
+	id, err := uuid.Parse(userID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid user ID")
+	}
+	return s.users.GetByID(ctx, id)
+}
+
 func (s *AuthService) issueToken(userID uuid.UUID) (string, error) {
 	now := time.Now()
 	claims := jwt.RegisteredClaims{

@@ -9,10 +9,10 @@ scrape_configs:
     static_configs:
       - targets: ['localhost:9090']
 
-  # Scrape the Trackr Go backend
+  # Scrape the Trackr Go backend — internal metrics port (not host-mapped)
   - job_name: trackr_backend
     static_configs:
-      - targets: ['backend:8080']
+      - targets: ['backend:9091']
     metrics_path: /metrics
 
   # Scrape host-level metrics from node_exporter

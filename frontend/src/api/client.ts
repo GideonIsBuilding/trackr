@@ -5,16 +5,14 @@ import type {
 
 const BASE = '/api'
 
-function getToken() { return localStorage.getItem('token') }
-
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const token = getToken()
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(init.headers as Record<string, string>),
   }
-  if (token) headers['Authorization'] = `Bearer ${token}`
 
+  // No Authorization header — auth is carried by the httpOnly session cookie,
+  // which the browser sends automatically for same-origin requests via Vite proxy.
   const res = await fetch(`${BASE}${path}`, { ...init, headers })
 
   if (res.status === 401) {
@@ -32,14 +30,17 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 // --- Auth ---
 export async function register(email: string, password: string, timezone: string) {
-  return request<{ user: User; token: string }>('/auth/register', {
+  return request<{ user: User }>('/auth/register', {
     method: 'POST', body: JSON.stringify({ email, password, timezone }),
   })
 }
 export async function login(email: string, password: string) {
-  return request<{ user: User; token: string }>('/auth/login', {
+  return request<{ user: User }>('/auth/login', {
     method: 'POST', body: JSON.stringify({ email, password }),
   })
+}
+export async function logout() {
+  return request<{ ok: boolean }>('/auth/logout', { method: 'POST' })
 }
 export async function forgotPassword(email: string) {
   return request<{ message: string }>('/auth/forgot-password', {
